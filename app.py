@@ -1,18 +1,9 @@
-import base64
-import json
-import os
-import re
-import time
-import uuid
-from io import BytesIO
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
 import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
-# from svgpathtools import parse_path
+import base64
+from io import BytesIO
+import requests
 
 
 def hex_to_rgba(value, opacity):
@@ -26,9 +17,7 @@ def page_sketch():
     st.markdown(
         """
         Instruction:
-        1. Draw on the canvas
-        2. Use the drawing tools at the sidebar
-        3. Click transform
+        (1) Draw on the canvas, (2) Use the drawing tools at the sidebar, (3) Click transform
         """
     )
 
@@ -36,6 +25,7 @@ def page_sketch():
     drawing_mode = st.sidebar.selectbox(
         "Drawing Mode:", ("freedraw", "point", "line", "rect", "polygon", "circle", "transform"),
     )
+    # !!Rename drawing mode
     
     col_1 = st.sidebar.columns(2)
     with col_1[0]:
@@ -67,20 +57,40 @@ def page_sketch():
     bg_color = st.sidebar.color_picker("Canvas Background color", "#eee")
     image_uploader = st.sidebar.file_uploader("Upload image", type=["png", "jpg"])
     image_external = st.sidebar.text_input("Set online image")
+    # !!Selectbox for cached images in session state
 
+    # url="https://static.vecteezy.com/system/resources/previews/009/780/776/original/cute-little-monkey-cartoon-on-tree-branch-free-vector.jpg"
+    
+
+    st.sidebar.markdown(
+        """
+        ---
+        Made by: Rendy-K (https://github.com/rendy-k/KidCanvas)
+        """
+    )
+    
+    background_image = None
     if image_uploader:
         background_image = Image.open(image_uploader) if image_uploader else None
+    elif image_external:
+        background_image = Image.open(BytesIO(requests.get(image_external, stream=True).content))
+    if background_image:
+        width_expected = int((600/400*background_image.size[1]))
+        width_factor = int((background_image.size[0] - width_expected)/2)
+        background_image = background_image.crop(
+            (width_factor, 0, background_image.size[0]-width_factor, background_image.size[1])
+        )
         background_image = background_image.resize((600, 400))
-        # Crop
+        
     
-    
+
     # Display the canvas
     canvas = st_canvas(
         fill_color=hex_to_rgba(fill_color, fill_opacity),
         stroke_width=stroke_width,
         stroke_color=hex_to_rgba(stroke_color, stroke_opacity),
         background_color=bg_color,
-        background_image=background_image if image_uploader else None,
+        background_image=background_image if background_image else None,
         update_streamlit=True,
         drawing_mode=drawing_mode,
         point_display_radius=point_display_radius if drawing_mode == "point" else 0,
@@ -88,100 +98,42 @@ def page_sketch():
         key="canvas",
     )
 
-    transform = st.button("Transform")
+    transform = st.button("Transform ✏️")
 
     if transform:
         with st.spinner("Transforming . . ."):
-            # Display result
+            # Process the input
             doodle = Image.fromarray(canvas.image_data.astype('uint8'), 'RGBA')
-            if image_uploader:
+            if background_image:
                 canvas_result = Image.alpha_composite(background_image.convert('RGBA'), doodle)
             else:
                 canvas_result = doodle
-            st.image(canvas_result)
+            img_bg = Image.new('RGBA', (600, 400), bg_color)
+            canvas_result = Image.alpha_composite(img_bg, canvas_result)
             
+
+            # Run the model
+            
+            # Display result
+            st.image(canvas_result) # Change to the result
+
+            # Download
+            
+            in_memory = BytesIO()
+            canvas_result.save(in_memory, format="PNG")
+            b64 = base64.b64encode(in_memory.getvalue()).decode()
+            href = f'<a href="data:application/octet-stream;base64,{b64}" download="KidCanvas_input.png">Download input</a>'
+            # href2 = f'<a href="data:application/octet-stream;base64,{b64.decode()}" download=KidCanvas_result>Download result</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            # st.markdown(href2, unsafe_allow_html=True)
+
+
+def load_model():
+    pass
 
 
 def advanced_setting():
-    pass
-
-def png_export():
-    st.markdown(
-        """
-    Realtime update is disabled for this demo. 
-    Press the 'Download' button at the bottom of canvas to update exported image.
-    """
-    )
-    try:
-        Path("tmp/").mkdir()
-    except FileExistsError:
-        pass
-
-    # Regular deletion of tmp files
-    # Hopefully callback makes this better
-    now = time.time()
-    N_HOURS_BEFORE_DELETION = 1
-    for f in Path("tmp/").glob("*.png"):
-        st.write(f, os.stat(f).st_mtime, now)
-        if os.stat(f).st_mtime < now - N_HOURS_BEFORE_DELETION * 3600:
-            Path.unlink(f)
-
-    if st.session_state["button_id"] == "":
-        st.session_state["button_id"] = re.sub(
-            "\d+", "", str(uuid.uuid4()).replace("-", "")
-        )
-
-    button_id = st.session_state["button_id"]
-    file_path = f"tmp/{button_id}.png"
-
-    custom_css = f""" 
-        <style>
-            #{button_id} {{
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background-color: rgb(255, 255, 255);
-                color: rgb(38, 39, 48);
-                padding: .25rem .75rem;
-                position: relative;
-                text-decoration: none;
-                border-radius: 4px;
-                border-width: 1px;
-                border-style: solid;
-                border-color: rgb(230, 234, 241);
-                border-image: initial;
-            }} 
-            #{button_id}:hover {{
-                border-color: rgb(246, 51, 102);
-                color: rgb(246, 51, 102);
-            }}
-            #{button_id}:active {{
-                box-shadow: none;
-                background-color: rgb(246, 51, 102);
-                color: white;
-                }}
-        </style> """
-
-    data = st_canvas(update_streamlit=False, key="png_export")
-    if data is not None and data.image_data is not None:
-        img_data = data.image_data
-        im = Image.fromarray(img_data.astype("uint8"), mode="RGBA")
-        im.save(file_path, "PNG")
-
-        buffered = BytesIO()
-        im.save(buffered, format="PNG")
-        img_data = buffered.getvalue()
-        try:
-            # some strings <-> bytes conversions necessary here
-            b64 = base64.b64encode(img_data.encode()).decode()
-        except AttributeError:
-            b64 = base64.b64encode(img_data).decode()
-
-        dl_link = (
-            custom_css
-            + f'<a download="{file_path}" id="{button_id}" href="data:file/txt;base64,{b64}">Export PNG</a><br></br>'
-        )
-        st.markdown(dl_link, unsafe_allow_html=True)
+    pass # Expander
 
 
 def main():
