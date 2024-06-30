@@ -1,6 +1,8 @@
 streamlit==1.27.2
-pillow==10.0.0
 streamlit-drawable-canvas==0.9.3
+pillow==10.0.0
 requests==2.31.0
 torch==2.1.0
 diffusers==0.29.1
+accelerate
+transformers
