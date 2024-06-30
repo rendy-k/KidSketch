@@ -16,69 +16,34 @@ def hex_to_rgba(value: str, opacity: float) -> str:
     return f"rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, {opacity})"
 
 
-def zipfile_downloader(input_prompt: str, doodle: Image, gen_images: list) -> str:
+def zipfile_downloader(input_prompt: str, canvas_result: Image, gen_images: Image) -> str:
     zip_in_memory = BytesIO()
     with zipfile.ZipFile(zip_in_memory, "a", zipfile.ZIP_DEFLATED, False) as zipped:
         in_memory = BytesIO()
-        doodle.save(in_memory, format="PNG")
-        zipped.writestr(f"KidCanvas_{input_prompt}/input_image_{input_prompt}.png", in_memory.getvalue())
+        canvas_result.save(in_memory, format="JPEG")
+        zipped.writestr(f"KidCanvas_{input_prompt}/input_image_{input_prompt}.jpeg", in_memory.getvalue())
 
-        for i, img in enumerate(gen_images):
-            in_memory = BytesIO()
-            img.save(in_memory, format="PNG")
-            zipped.writestr(f"KidCanvas_{input_prompt}/output_image_{input_prompt}_{i+1}.png", in_memory.getvalue())
+        in_memory = BytesIO()
+        gen_images.save(in_memory, format="JPEG")
+        zipped.writestr(f"KidCanvas_{input_prompt}/output_image_{input_prompt}_{1}.jpeg", in_memory.getvalue())
         
     b64 = base64.b64encode(zip_in_memory.getvalue()).decode()
     href = f'<a href="data:application/octet-stream;base64,{b64}" download="KidCanvas_{input_prompt}.zip">Download input</a>'
     return href
 
 
-def run_model(
-        input_prompt: str,
-        elaborate_prompt: list,
-        sketch,
-        negative_prompt: str,
-        seed: int,
-        num_inference_steps: int,
-        strength: float,
-        guidance_scale: float,
-    ) -> list:
-    prompt = []
-    for p in elaborate_prompt:
-        prompt.append(input_prompt + ", " + p) 
-    
-    gen_images = st.session_state["model"](
-        prompt=prompt,
-        image=sketch,
-        negative_prompt=[negative_prompt] * len(prompt),
-        generator=torch.Generator(device="cuda").manual_seed(seed),
-        num_images_per_prompt=1,
-        num_inference_steps=num_inference_steps,
-        height=400,
-        width=600,
-        strength=strength,
-        guidance_scale=guidance_scale,
-    )
-
-    return gen_images[0]
-
-
 def advanced_setting():
     with st.expander("Advanced setting"):
         with st.form("setting"):
             elaborate_prompt = st.text_area(
-                "Extra prompt",
-                value="realistic, high quality, detailed, colorful; cartoon, high quality, detailed; 3d animated, high quality, detailed, colorful",
-                help="3 extra prompts separated by semicolon (;)"
+                "Extra prompt", value="realistic, high quality, detailed",
             )
-            elaborate_prompt = elaborate_prompt.split(";")
             negative_prompt = st.text_input("Negative prompt", value="distorted, deformed, disfigured, ugly")
             setting_col_1 = st.columns(1)
             with setting_col_1[0]:
                 num_inference_steps = st.number_input(
-                    "Number of inference steps", value=50, max_value=100, min_value=1
+                    "Number of inference steps", value=35, max_value=100, min_value=1
                 )
-            
 
             setting_col_2 = st.columns(2)
             with setting_col_2[0]:
@@ -95,16 +60,53 @@ def advanced_setting():
             button_setting = st.form_submit_button("Save setting")
         
         return elaborate_prompt, negative_prompt, num_inference_steps, strength, guidance_scale
-        
+
 
 def load_diffuser():
     # Load the model
     pipeline_img2img = AutoPipelineForImage2Image.from_pretrained(
-        "runwayml/stable-diffusion-v1-5", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
+        "runwayml/stable-diffusion-v1-5",
+        torch_dtype=torch.float16,
+        variant="fp16",
+        use_safetensors=True
     )
     pipeline_img2img.enable_model_cpu_offload()
-
     return pipeline_img2img
+
+
+def run_model(
+        input_prompt: str,
+        elaborate_prompt: str,
+        sketch: Image,
+        negative_prompt: str,
+        seed: int,
+        num_inference_steps: int,
+        strength: float,
+        guidance_scale: float,
+    ) -> list:
+    # Load diffuser model
+    if "model" not in st.session_state:
+        st.session_state["model"] = None
+        st.session_state["model"] = load_diffuser()
+    
+    gen_images = st.session_state["model"](
+        prompt=input_prompt + ", " + elaborate_prompt,
+        image=sketch,
+        negative_prompt=negative_prompt,
+        generator=torch.Generator(device="cuda").manual_seed(seed),
+        num_images_per_prompt=1,
+        num_inference_steps=num_inference_steps,
+        height=400,
+        width=600,
+        strength=strength,
+        guidance_scale=guidance_scale,
+    )
+    
+    # Save images to session state
+    st.session_state["sketch_input"].append(sketch)
+    st.session_state["generated_images"].extend(gen_images[0])
+    
+    return gen_images
 
 
 def page_sketch():
@@ -209,11 +211,12 @@ def page_sketch():
             input_prompt = st.text_input("Describe the picture", value="")
         with input_col[1]:
             include_bg = st.checkbox(
-                "Include background",
-                value=True, help="If unchecked, the background will not be processed"
+                "Include background", value=True, help="If unchecked, the background will not be processed"
             )
         with input_col[2]:
-            manual_seed = st.number_input("Seed", value=12)
+            manual_seed = st.number_input(
+                "Seed", value=12, help="Change to any value to generate a different image"
+            )
         transform = st.form_submit_button("Transform ✏️")
 
     if transform:
@@ -221,34 +224,34 @@ def page_sketch():
             with st.spinner("Transforming . . ."):
                 # Process the input
                 doodle = Image.fromarray(canvas.image_data.astype('uint8'), 'RGBA')
+
                 # Imported background
-                if background_image==True and include_bg==True:
+                if background_image is not None and include_bg==True:
                     canvas_result = Image.alpha_composite(background_image.convert('RGBA'), doodle)
                 else:
                     canvas_result = doodle
+                buffer = BytesIO()
+                canvas_result.convert('RGB').save(buffer, format="JPEG")
+                buffer.seek(0)
+                canvas_result = Image.open(buffer)
                 
                 # Run the model
                 gen_images = run_model(
-                    input_prompt, elaborate_prompt,
+                    input_prompt,
+                    elaborate_prompt,
                     canvas_result,
                     negative_prompt,
                     manual_seed,
                     num_inference_steps,
                     strength,
                     guidance_scale,
-                )
-                
-                # Save images to session state
-                st.session_state["generated_images"].append(doodle)
-                st.session_state["generated_images"].extend(gen_images)
-                
+                )              
                 
                 # Display result
-                for i in gen_images:
-                    st.image(i)
+                st.image(st.session_state["generated_images"][-1])
 
                 # Download
-                href = zipfile_downloader(input_prompt, doodle, gen_images)
+                href = zipfile_downloader(input_prompt, canvas_result, st.session_state["generated_images"][-1])
                 st.markdown(href, unsafe_allow_html=True)
         else:
             st.markdown("Please describe the picture")
@@ -262,13 +265,10 @@ def main():
     st.sidebar.subheader("Drawing Tools")
     
     # Save image
+    if "sketch_input" not in st.session_state:
+        st.session_state["sketch_input"] = []
     if "generated_images" not in st.session_state:
         st.session_state["generated_images"] = []
-
-    # Load diffuser model
-    if "model" not in st.session_state:
-        st.session_state["model"] = None
-        st.session_state["model"] = load_diffuser()
     
     page_sketch()
 
