@@ -42,7 +42,7 @@ def advanced_setting():
             setting_col_1 = st.columns(1)
             with setting_col_1[0]:
                 num_inference_steps = st.number_input(
-                    "Number of inference steps", value=35, max_value=100, min_value=1
+                    "Number of inference steps", value=25, max_value=100, min_value=1
                 )
 
             setting_col_2 = st.columns(2)
@@ -65,12 +65,19 @@ def advanced_setting():
 def load_diffuser():
     # Load the model
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    pipeline_img2img = AutoPipelineForImage2Image.from_pretrained(
-        "runwayml/stable-diffusion-v1-5",
-        torch_dtype=torch.float16,
-        variant="fp16",
-        use_safetensors=True
-    ).to(device)
+    if device == "cuda":
+        pipeline_img2img = AutoPipelineForImage2Image.from_pretrained(
+            "runwayml/stable-diffusion-v1-5",
+            torch_dtype=torch.float16,
+            variant="fp16",
+            use_safetensors=True
+        ).to(device)
+    else:
+        pipeline_img2img = AutoPipelineForImage2Image.from_pretrained(
+            "runwayml/stable-diffusion-v1-5",
+            variant="fp16",
+            use_safetensors=True
+        ).to(device)
     return pipeline_img2img
 
 
