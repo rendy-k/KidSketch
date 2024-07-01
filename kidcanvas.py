@@ -64,13 +64,13 @@ def advanced_setting():
 
 def load_diffuser():
     # Load the model
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     pipeline_img2img = AutoPipelineForImage2Image.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
         torch_dtype=torch.float16,
         variant="fp16",
         use_safetensors=True
-    )
-    pipeline_img2img.enable_model_cpu_offload()
+    ).to(device)
     return pipeline_img2img
 
 
@@ -89,11 +89,12 @@ def run_model(
         st.session_state["model"] = None
         st.session_state["model"] = load_diffuser()
     
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     gen_images = st.session_state["model"](
         prompt=input_prompt + ", " + elaborate_prompt,
         image=sketch,
         negative_prompt=negative_prompt,
-        generator=torch.Generator(device="cuda").manual_seed(seed),
+        generator=torch.Generator(device=device).manual_seed(seed),
         num_images_per_prompt=1,
         num_inference_steps=num_inference_steps,
         height=400,
@@ -118,7 +119,7 @@ def page_sketch():
                 Instruction:\n
                 (1) Draw on the canvas\n
                 (2) Use the drawing tools at the sidebar\n
-                (3) Click the 'Send to streamlit' button located at the bottom left of the canvas (icon: arrow pointing down)\n
+                (3) [IMPORTANT!] Click the 'Send to streamlit' button located at the bottom left of the canvas (icon: arrow pointing down) (The black icon is difficult to find in dark theme)\n
                 (4) Click transform
                 """
             )
