@@ -16,3 +16,4 @@ Run the command `streamlit run kidcanvas.py`
 
 # Application deployed link
 https://kidcanvas-rendy-k.streamlit.app/
+(may fail in running the model (after clicking the "Transform" button) due to lack of computing resources.)
